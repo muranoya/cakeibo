@@ -55,7 +55,7 @@ static void free_records(struct record *r, int len);
 static void uses(char *argv[]);
 static FILE *open(struct mytime *t, const char *mode);
 static struct record *load(struct mytime *t, int *len);
-static void append(struct mytime *t, char *cat, int clen, char *loc, int32_t money, char *note);
+static void append(struct mytime *t, char *cat, char *loc, int32_t money, char *note);
 static int datetime2str_(uint32_t mask, uint32_t a, const char *f, int v, char *str);
 static char *datetime2str(struct mytime *t);
 static char *datetime2str_w(struct mytime *t, uint32_t m);
@@ -64,6 +64,7 @@ static int parsedate_(char *str, uint32_t *mask, uint32_t mask2,
         int upper, int lower, int *t, int offset);
 static int parsedate(char *str, struct mytime *t);
 static void getnowdate(struct mytime *t);
+static void modeadd_opt(int *argc, char **argv[], char **loc, char **note, int *silent);
 static void modeadd(int argc, char *argv[]);
 static void modestat(int argc, char *argv[]);
 static void modeshow(int argc, char *argv[]);
@@ -159,7 +160,6 @@ open(struct mytime *t, const char *mode)
     path = (char*)try_malloc(len);
     snprintf(path, len, "%s/%s/%d",
             home, DATA_DIR, t->time.tm_year+1900);
-
     mkdir(path,
             S_IRUSR | S_IWUSR | S_IXUSR |
             S_IRGRP | S_IWGRP | S_IXGRP |
@@ -278,14 +278,14 @@ load(struct mytime *t, int *len)
     return recs;
 
 LERROR:
-    fprintf(stderr, "エラー: %s(%d年%d月:%d行目)\n",
+    fprintf(stderr, "Error: %s(%d年%d月:%d行目)\n",
             errstr, t->time.tm_year+1900, t->time.tm_mon+1, line+1);
     exit(EXIT_FAILURE);
     return NULL;
 }
 
 static void
-append(struct mytime *t, char *cat, int clen, char *loc, int32_t money, char *note)
+append(struct mytime *t, char *cat, char *loc, int32_t money, char *note)
 {
     FILE *fp = open(t, "a");
     
@@ -463,24 +463,16 @@ getnowdate(struct mytime *t)
 }
 
 static void
-modeadd(int argc_org, char *argv_org[])
+modeadd_opt(int *argc, char **argv[], char **loc, char **note, int *silent)
 {
-    int argc = argc_org;
-    char **argv = argv_org;
     int result;
-    struct mytime time;
-    int silent;
-    char *note;
     int note_len;
-    char *cat;
-    int cat_len;
-    char *loc;
     int loc_len;
-    int32_t money;
 
-    note = cat = loc = NULL;
-    silent = 0;
-    while ((result = getopt(argc, argv, "l:m:s")) != -1)
+    *loc = NULL;
+    *note = NULL;
+    *silent = 0;
+    while ((result = getopt(*argc, *argv, "l:m:s")) != -1)
     {
         switch (result)
         {
@@ -488,106 +480,116 @@ modeadd(int argc_org, char *argv_org[])
                 note_len = (strlen(optarg)+1)*sizeof(char);
                 if (note_len > MAX_NOTE_LEN)
                 {
-                    fprintf(stderr, "エラー: 備考が長過ぎます(最大%d文字，%ld文字)\n",
+                    fprintf(stderr, "Error: 備考が長過ぎます(最大%d文字，%ld文字)\n",
                             MAX_NOTE_LEN, strlen(optarg));
                     exit(EXIT_FAILURE);
                 }
-                note = (char *)try_malloc(note_len);
-                strcpy(note, optarg);
+                *note = (char *)try_malloc(note_len);
+                strcpy(*note, optarg);
                 break;
             case 'l':
                 loc_len = (strlen(optarg)+1)*sizeof(char);
                 if (loc_len > MAX_LOC_LEN)
                 {
-                    fprintf(stderr, "エラー: 場所が長過ぎます(最大%d文字，%ld文字)\n",
+                    fprintf(stderr, "Error: 場所が長過ぎます(最大%d文字，%ld文字)\n",
                             MAX_LOC_LEN, strlen(optarg));
                     exit(EXIT_FAILURE);
                 }
-                loc = (char*)try_malloc(loc_len);
-                strcpy(loc, optarg);
+                *loc = (char*)try_malloc(loc_len);
+                strcpy(*loc, optarg);
                 break;
             case 's':
-                silent = 1;
+                *silent = 1;
                 break;
             default:
-                uses(argv);
+                uses(*argv);
                 break;
         }
     }
 
-    argc -= optind;
-    argv += optind;
+    *argc -= optind;
+    *argv += optind + 1;
+}
 
-    if (strcmp(CMD_ADD, argv[0])) uses(argv_org);
-    argv++;
+static void
+modeadd(int argc_org, char *argv_org[])
+{
+    int argc = argc_org;
+    char **argv = argv_org;
+    struct mytime time;
+    int silent;
+    char *note, *cat, *loc;
+    int cat_len;
+    int32_t money;
 
-    switch (argc)
+    if (strcmp(CMD_ADD, argv_org[1])) uses(argv_org);
+    modeadd_opt(&argc, &argv, &loc, &note, &silent);
+    if (argc != 3 && argc != 4) uses(argv_org);
+
+    // 日付
+    if (argc == 3)
     {
-        case 3:
-        case 4:
-            // 日付
-            if (argc == 3)
-            {
-                getnowdate(&time);
-            }
-            else
-            {
-                if (!parsedate(*argv, &time))
-                {
-                    fprintf(stderr, "エラー: 日付のフォーマットが正しくありません(%s)\n",
-                            *argv);
-                    exit(EXIT_FAILURE);
-                }
-                if ((time.mask & MASK_YMD) != MASK_YMD)
-                {
-                    fprintf(stderr, "エラー: 日付指定には年月日が最低でも必要です(%s)\n",
-                            *argv);
-                    exit(EXIT_FAILURE);
-                }
-                argv++;
-            }
-
-            // 品名
-            cat_len = (strlen(*argv)+1)*sizeof(char);
-            if (cat_len > MAX_CAT_LEN)
-            {
-                fprintf(stderr, "エラー: 品名が長過ぎます(最大%d文字，%ld文字)\n",
-                        MAX_CAT_LEN, strlen(*argv));
-                exit(EXIT_FAILURE);
-            }
-            cat = (char*)try_malloc(cat_len);
-            strcpy(cat, *argv++);
-
-            // 金額
-            if (strlen(*argv) != parsemoney(*argv, &money))
-            {
-                fprintf(stderr, "エラー: 金額のフォーマットが正しくありません(%s)\n",
-                        *argv);
-                exit(EXIT_FAILURE);
-            }
-
-            // 追加，出力
-            append(&time, cat, cat_len, loc, money, note);
-            printf("日付: %s\n品名: %s\n",
-                    datetime2str_w(&time, MASK_ALL), cat);
-            if (loc != NULL) printf("場所: %s\n", loc);
-            printf("金額: %'d\n", money);
-            if (note != NULL) printf("備考: %s\n", note);
-
-            if (!silent)
-            {
-                int i, len, sum = 0;
-                struct record *recs = load(&time, &len);
-                for (i = 0; i < len; ++i) sum += (recs+i)->money;
-                printf("%d年%d月の合計使用金額: %'d円\n",
-                        time.time.tm_year+1900, time.time.tm_mon+1, sum);
-                free_records(recs, len);
-            }
-            break;
-        default:
-            uses(argv_org);
-            break;
+        getnowdate(&time);
     }
+    else
+    {
+        if (!parsedate(*argv, &time))
+        {
+            fprintf(stderr, "Error: 日付のフォーマットが正しくありません(%s)\n",
+                    *argv);
+            exit(EXIT_FAILURE);
+        }
+        if ((time.mask & MASK_YMD) != MASK_YMD)
+        {
+            fprintf(stderr, "Error: 日付指定には年月日が最低でも必要です(%s)\n",
+                    *argv);
+            exit(EXIT_FAILURE);
+        }
+        argv++;
+    }
+
+    // 品名
+    cat_len = (strlen(*argv)+1)*sizeof(char);
+    if (cat_len > MAX_CAT_LEN)
+    {
+        fprintf(stderr, "Error: 品名が長過ぎます(最大%d文字，%ld文字)\n",
+                MAX_CAT_LEN, strlen(*argv));
+        exit(EXIT_FAILURE);
+    }
+    cat = (char*)try_malloc(cat_len);
+    strcpy(cat, *argv++);
+
+    // 金額
+    if (strlen(*argv) != parsemoney(*argv, &money))
+    {
+        fprintf(stderr, "Error: 金額のフォーマットが正しくありません(%s)\n",
+                *argv);
+        exit(EXIT_FAILURE);
+    }
+
+    // 追加
+    append(&time, cat, loc, money, note);
+
+    if (!silent)
+    {
+        int i, len, sum = 0;
+        struct record *recs = load(&time, &len);
+
+        printf("日付: %s\n品名: %s\n",
+                datetime2str_w(&time, MASK_ALL), cat);
+        if (loc != NULL) printf("場所: %s\n", loc);
+        printf("金額: %'d\n", money);
+        if (note != NULL) printf("備考: %s\n", note);
+
+        for (i = 0; i < len; ++i) sum += (recs+i)->money;
+        printf("%d年%d月の合計使用金額: %'d円\n",
+                time.time.tm_year+1900, time.time.tm_mon+1, sum);
+        free_records(recs, len);
+    }
+
+    free(note);
+    free(loc);
+    free(cat);
 }
 
 static void
@@ -614,13 +616,13 @@ modeshow(int argc, char *argv[])
     {
         if (!parsedate(argv[2], &time))
         {
-            fprintf(stderr, "エラー: 日付のフォーマットが正しくありません(%s)\n",
+            fprintf(stderr, "Error: 日付のフォーマットが正しくありません(%s)\n",
                     argv[0]);
             exit(EXIT_FAILURE);
         }
         if ((time.mask & MASK_YEAR) != MASK_YEAR)
         {
-            fprintf(stderr, "エラー: 日付指定には年が最低でも必要です(%s)\n",
+            fprintf(stderr, "Error: 日付指定には年が最低でも必要です(%s)\n",
                     argv[0]);
             exit(EXIT_FAILURE);
         }
