@@ -158,6 +158,12 @@ open(struct mytime *t, const char *mode)
 
     len = sizeof(char)*(strlen(DATA_DIR)+strlen(home)+128);
     path = (char*)try_malloc(len);
+    snprintf(path, len, "%s/%s",
+            home, DATA_DIR);
+    mkdir(path,
+            S_IRUSR | S_IWUSR | S_IXUSR |
+            S_IRGRP | S_IWGRP | S_IXGRP |
+            S_IROTH |           S_IXOTH);
     snprintf(path, len, "%s/%s/%d",
             home, DATA_DIR, t->time.tm_year+1900);
     mkdir(path,
