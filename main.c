@@ -28,8 +28,8 @@
 #define MAX_LOC_LEN (100)
 #define MAX_NOTE_LEN (600)
 
-// MAX_CAT_LEN+MAX_NOTE_LEN+日付+金額の文字列を格納できるくらい
-// 余裕のある大きさにする必要がある
+// MAX_LOC_LEN + MAX_CAT_LEN + MAX_NOTE_LEN + 日付 + 金額の文字列
+// を格納できるくらい余裕のある大きさにする必要がある
 #define BUF_LEN (1024)
 
 #define DELIMITER ("; ")
@@ -62,7 +62,7 @@ static char *datetime2str_w(struct mytime *t, uint32_t m);
 static int parsemoney(char *str, int32_t *m);
 static int parsedate_(char *str, uint32_t *mask, uint32_t mask2,
         int upper, int lower, int *t, int offset);
-static int parsedate(char *str, struct mytime *t);
+static int parsedate(char *str, struct mytime *t, uint32_t m);
 static void getnowdate(struct mytime *t);
 static void modeadd_opt(int *argc, char **argv[], char **loc, char **note, int *silent);
 static void modeadd(int argc, char *argv[]);
@@ -72,9 +72,7 @@ static void modeshow(int argc, char *argv[]);
 static void *
 try_realloc(void *pointer, size_t size)
 {
-    void *p;
-
-    p = realloc(pointer, size);
+    void *p = realloc(pointer, size);
     if (p == NULL)
     {
         perror("");
@@ -86,9 +84,7 @@ try_realloc(void *pointer, size_t size)
 static void *
 try_malloc(size_t size)
 {
-    void *p;
-
-    p = malloc(size);
+    void *p = malloc(size);
     if (p == NULL)
     {
         perror("");
@@ -126,9 +122,12 @@ uses(char *argv[])
             "\t家計簿の統計情報を表示する\n"
             "\t[日付]: 省略可(省略した場合，今月のデータが表示される)\n\n"
             
-            "%s %s [日付]\n"
+            "%s %s [範囲初めの日付] [範囲終わりの日付]\n"
             "\t家計簿のデータを表示する\n"
-            "\t[日付]: 省略可(省略した場合，今月のデータが表示される)\n\n"
+            "\t[範囲初めの日付]: 省略可\n"
+            "\t[範囲終わりの日付]: 省略可\n"
+            "\t範囲終わりの日付を省略した場合，範囲初めの日付に含まれるデータを表示する．\n"
+            "\t2つとも省略した場合，今月のデータだけが表示される．\n\n"
             
             "%s %s\n"
             "\tこのヘルプを表示する\n\n"
@@ -136,7 +135,7 @@ uses(char *argv[])
             "DESCRIPTION\n"
             "\t[日付]: 年/月/日:時:分:秒\n"
             "\t\t右から順に省略してよい\n"
-            "\t\t例: '2015/3/8 13:20'はよいが，日にちを省略した'2015/3 13:20'は不可\n"
+            "\t\t例: '2015/3/8:13:20'はよいが，日にちを省略した'2015/3:13:20'は不可\n"
             "\t[金額]: 単位は円，\",\"を含む記述が可能\n",
             argv[0], CMD_ADD,
             argv[0], CMD_STAT,
@@ -215,8 +214,8 @@ load(struct mytime *t, int *len)
         rec_p = recs+line;
 
         // 日付
-        p = parsedate(buf, &(rec_p->time));
-        if (p == 0 || strncmp(DELIMITER, buf+p, delimiter_len))
+        p = parsedate(buf, &(rec_p->time), MASK_YMD);
+        if (strncmp(DELIMITER, buf+p, delimiter_len))
         {
             errstr = "ログファイルの日付フォーマットが正しくありません";
             goto LERROR;
@@ -412,7 +411,7 @@ parsedate_(char *str, uint32_t *mask, uint32_t mask2, int upper, int lower, int 
 }
 
 static int
-parsedate(char *str, struct mytime *t)
+parsedate(char *str, struct mytime *t, uint32_t m)
 {
     int ret;
     int p = 0;
@@ -453,6 +452,11 @@ parsedate(char *str, struct mytime *t)
     p += ret;
 
 LEND:
+    if ((m & t->mask) != m)
+    {
+        fprintf(stderr, "日付指定に必要な要素が足りません(%s)\n", str);
+        exit(EXIT_FAILURE);
+    }
     return p;
 }
 
@@ -539,18 +543,7 @@ modeadd(int argc_org, char *argv_org[])
     }
     else
     {
-        if (!parsedate(*argv, &time))
-        {
-            fprintf(stderr, "Error: 日付のフォーマットが正しくありません(%s)\n",
-                    *argv);
-            exit(EXIT_FAILURE);
-        }
-        if ((time.mask & MASK_YMD) != MASK_YMD)
-        {
-            fprintf(stderr, "Error: 日付指定には年月日が最低でも必要です(%s)\n",
-                    *argv);
-            exit(EXIT_FAILURE);
-        }
+        parsedate(*argv, &time, MASK_YMD);
         argv++;
     }
 
@@ -609,32 +602,24 @@ modeshow(int argc, char *argv[])
     struct record *recs;
     struct record *rec_p;
     int recs_num;
-    struct mytime time;
+    struct mytime stime;
+    struct mytime etime;
     int i;
 
     if (strcmp(CMD_SHOW, argv[1])) uses(argv);
 
     if (argc == 2)
     {
-        getnowdate(&time);
+        getnowdate(&stime);
     }
     else
     {
-        if (!parsedate(argv[2], &time))
-        {
-            fprintf(stderr, "Error: 日付のフォーマットが正しくありません(%s)\n",
-                    argv[0]);
-            exit(EXIT_FAILURE);
-        }
-        if ((time.mask & MASK_YEAR) != MASK_YEAR)
-        {
-            fprintf(stderr, "Error: 日付指定には年が最低でも必要です(%s)\n",
-                    argv[0]);
-            exit(EXIT_FAILURE);
-        }
+        parsedate(argv[2], &stime, MASK_YEAR);
+        if (argc >= 4)
+            parsedate(argv[3], &etime, MASK_YEAR);
     }
 
-    recs = load(&time, &recs_num);
+    recs = load(&stime, &recs_num);
     for (i = 0; i < recs_num; ++i)
     {
         rec_p = recs+i;
@@ -645,6 +630,7 @@ modeshow(int argc, char *argv[])
             printf("備考:%s\n", rec_p->note);
         }
     }
+    free_records(recs, recs_num);
 }
 
 int
