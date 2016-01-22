@@ -17,16 +17,12 @@
 #define MASK_YEAR  (0x20U)
 #define MASK_MONTH (0x10U)
 #define MASK_DAY   (0x08U)
-#define MASK_HOUR  (0x04U)
-#define MASK_MIN   (0x02U)
-#define MASK_SEC   (0x01U)
 #define MASK_EMPTY (0x00U)
-#define MASK_YMD (MASK_YEAR | MASK_MONTH | MASK_DAY)
-#define MASK_ALL (MASK_YMD | MASK_HOUR | MASK_MIN | MASK_SEC)
+#define MASK_ALL (MASK_YEAR | MASK_MONTH | MASK_DAY)
 
 #define MAX_CAT_LEN (100)
 #define MAX_LOC_LEN (100)
-#define MAX_NOTE_LEN (600)
+#define MAX_NOTE_LEN (500)
 
 // MAX_LOC_LEN + MAX_CAT_LEN + MAX_NOTE_LEN + 日付 + 金額の文字列
 // を格納できるくらい余裕のある大きさにする必要がある
@@ -34,15 +30,17 @@
 
 #define DELIMITER ("; ")
 
-struct mytime
+struct mydate
 {
     uint32_t mask;
-    struct tm time;
+    int year;
+    int month;
+    int day;
 };
 
 struct record
 {
-    struct mytime time;
+    struct mydate date;
     char *cat;
     char *loc;
     int32_t money;
@@ -53,21 +51,32 @@ static void *try_realloc(void *pointer, size_t size);
 static void *try_malloc(size_t size);
 static void free_records(struct record *r, int len);
 static void uses(char *argv[]);
-static FILE *open(struct mytime *t, const char *mode);
-static struct record *load(struct mytime *t, int *len);
-static void append(struct mytime *t, char *cat, char *loc, int32_t money, char *note);
-static int datetime2str_(uint32_t mask, uint32_t a, const char *f, int v, char *str);
-static char *datetime2str(struct mytime *t);
-static char *datetime2str_w(struct mytime *t, uint32_t m);
+static FILE *open(struct mydate *t, const char *mode);
+static struct record *load(struct mydate *t, int *len);
+static void append(struct mydate *t, char *cat, char *loc, int32_t money, char *note);
+static int date2str_(uint32_t mask, uint32_t a, const char *f, int v, char *str);
+static char *date2str(struct mydate *t);
+static char *date2str_w(struct mydate *t, uint32_t m);
 static int parsemoney(char *str, int32_t *m);
 static int parsedate_(char *str, uint32_t *mask, uint32_t mask2,
-        int upper, int lower, int *t, int offset);
-static int parsedate(char *str, struct mytime *t, uint32_t m);
-static void getnowdate(struct mytime *t);
+        int upper, int lower, int *t);
+static int parsedate(char *str, struct mydate *t, uint32_t m);
+static int date2int(struct mydate *t);
+static int isleapyear(int year);
+static void getnowdate(struct mydate *t);
 static void modeadd_opt(int *argc, char **argv[], char **loc, char **note, int *silent);
 static void modeadd(int argc, char *argv[]);
 static void modestat(int argc, char *argv[]);
+static void setterm(struct mydate *t1, struct mydate *t2);
+static void initterm(struct mydate *t1, struct mydate *t2);
+static void nextterm(struct mydate *t);
 static void modeshow(int argc, char *argv[]);
+
+static int MONTH[] = {
+    0,
+    31, 28, 31, 30,
+    31, 30, 31, 31,
+    30, 31, 30, 31};
 
 static void *
 try_realloc(void *pointer, size_t size)
@@ -133,10 +142,9 @@ uses(char *argv[])
             "\tこのヘルプを表示する\n\n"
 
             "DESCRIPTION\n"
-            "\t[日付]: 年/月/日:時:分:秒\n"
+            "\t[日付]: 年/月/日\n"
             "\t\t右から順に省略してよい\n"
-            "\t\t例: '2015/3/8:13:20'はよいが，日にちを省略した'2015/3:13:20'は不可\n"
-            "\t[金額]: 単位は円，\",\"を含む記述が可能\n",
+            "\t[金額]: \",\"を含む記述が可能\n",
             argv[0], CMD_ADD,
             argv[0], CMD_STAT,
             argv[0], CMD_SHOW,
@@ -146,7 +154,7 @@ uses(char *argv[])
 }
 
 static FILE *
-open(struct mytime *t, const char *mode)
+open(struct mydate *t, const char *mode)
 {
     FILE *fp;
     char *home;
@@ -157,22 +165,25 @@ open(struct mytime *t, const char *mode)
 
     len = sizeof(char)*(strlen(DATA_DIR)+strlen(home)+128);
     path = (char*)try_malloc(len);
+
     snprintf(path, len, "%s/%s",
             home, DATA_DIR);
     mkdir(path,
             S_IRUSR | S_IWUSR | S_IXUSR |
             S_IRGRP | S_IWGRP | S_IXGRP |
             S_IROTH |           S_IXOTH);
+    
     snprintf(path, len, "%s/%s/%d",
-            home, DATA_DIR, t->time.tm_year+1900);
+            home, DATA_DIR,
+            t->year);
     mkdir(path,
             S_IRUSR | S_IWUSR | S_IXUSR |
             S_IRGRP | S_IWGRP | S_IXGRP |
             S_IROTH |           S_IXOTH);
-
+    
     snprintf(path, len, "%s/%s/%d/%d",
             home, DATA_DIR,
-            t->time.tm_year+1900, t->time.tm_mon+1);
+            t->year, t->month);
 
     if ((fp = fopen(path, mode)) == NULL)
     {
@@ -185,7 +196,7 @@ open(struct mytime *t, const char *mode)
 }
 
 static struct record *
-load(struct mytime *t, int *len)
+load(struct mydate *t, int *len)
 {
     char buf[BUF_LEN];
     char buf2[BUF_LEN];
@@ -214,7 +225,7 @@ load(struct mytime *t, int *len)
         rec_p = recs+line;
 
         // 日付
-        p = parsedate(buf, &(rec_p->time), MASK_YMD);
+        p = parsedate(buf, &(rec_p->date), MASK_ALL);
         if (strncmp(DELIMITER, buf+p, delimiter_len))
         {
             errstr = "ログファイルの日付フォーマットが正しくありません";
@@ -252,7 +263,7 @@ load(struct mytime *t, int *len)
         buf2[i] = '\0';
         rec_p->loc = (char*)try_malloc((strlen(buf2)+1)*sizeof(char));
         strcpy(rec_p->loc, buf2);
-        p += delimiter_len;        
+        p += delimiter_len;
 
         // 金額
         if (!(temp = parsemoney(buf+p, &((recs+line)->money))))
@@ -284,13 +295,13 @@ load(struct mytime *t, int *len)
 
 LERROR:
     fprintf(stderr, "Error: %s(%d年%d月:%d行目)\n",
-            errstr, t->time.tm_year+1900, t->time.tm_mon+1, line+1);
+            errstr, t->year, t->month, line+1);
     exit(EXIT_FAILURE);
     return NULL;
 }
 
 static void
-append(struct mytime *t, char *cat, char *loc, int32_t money, char *note)
+append(struct mydate *t, char *cat, char *loc, int32_t money, char *note)
 {
     FILE *fp = open(t, "a");
     
@@ -300,7 +311,7 @@ append(struct mytime *t, char *cat, char *loc, int32_t money, char *note)
             "%s%s"
             "%d%s"
             "%s\n",
-            datetime2str(t), DELIMITER,
+            date2str(t), DELIMITER,
             cat, DELIMITER,
             loc == NULL ? "" : loc, DELIMITER,
             money, DELIMITER,
@@ -310,7 +321,7 @@ append(struct mytime *t, char *cat, char *loc, int32_t money, char *note)
 }
 
 static int
-datetime2str_(uint32_t mask, uint32_t a, const char *f, int v, char *str)
+date2str_(uint32_t mask, uint32_t a, const char *f, int v, char *str)
 {
     char temp[32];
 
@@ -324,38 +335,26 @@ datetime2str_(uint32_t mask, uint32_t a, const char *f, int v, char *str)
 }
 
 static char *
-datetime2str(struct mytime *t)
+date2str(struct mydate *t)
 {
     static char str[256];
     memset(str, '\0', sizeof(str)/sizeof(str[0]));
     
-    if (!datetime2str_(t->mask, MASK_YEAR,   "%d", t->time.tm_year+1900, str)) return str;
-    if (!datetime2str_(t->mask, MASK_MONTH, "/%d", t->time.tm_mon+1,     str)) return str;
-    if (!datetime2str_(t->mask, MASK_DAY,   "/%d", t->time.tm_mday,      str)) return str;
-    if (!datetime2str_(t->mask, MASK_HOUR,  ":%d", t->time.tm_hour,      str)) return str;
-    if (!datetime2str_(t->mask, MASK_MIN,   ":%d", t->time.tm_min,       str)) return str;
-    if (!datetime2str_(t->mask, MASK_SEC,   ":%d", t->time.tm_sec,       str)) return str;
+    date2str_(t->mask, MASK_YEAR,  "%d",  t->year,  str) && 
+    date2str_(t->mask, MASK_MONTH, "/%d", t->month, str) && 
+    date2str_(t->mask, MASK_DAY,   "/%d", t->day,   str);
     return str;
 }
 
 static char *
-datetime2str_w(struct mytime *t, uint32_t m)
+date2str_w(struct mydate *t, uint32_t m)
 {
     static char str[256];
     memset(str, '\0', sizeof(str)/sizeof(str[0]));
     
-    if (((m & MASK_YEAR) == MASK_YEAR)
-            && (!datetime2str_(t->mask, MASK_YEAR,  "%4d年", t->time.tm_year+1900, str))) return str;
-    if (((m & MASK_MONTH) == MASK_MONTH)
-            && (!datetime2str_(t->mask, MASK_MONTH, "%2d月", t->time.tm_mon+1,     str))) return str;
-    if (((m & MASK_DAY) == MASK_DAY)
-            && (!datetime2str_(t->mask, MASK_DAY,   "%2d日", t->time.tm_mday,      str))) return str;
-    if (((m & MASK_HOUR) == MASK_HOUR)
-            && (!datetime2str_(t->mask, MASK_HOUR, " %2d時", t->time.tm_hour,      str))) return str;
-    if (((m & MASK_MIN) == MASK_MIN)
-            && (!datetime2str_(t->mask, MASK_MIN,   "%2d分", t->time.tm_min,       str))) return str;
-    if (((m & MASK_SEC) == MASK_SEC)
-            && (!datetime2str_(t->mask, MASK_SEC,   "%2d秒", t->time.tm_sec,       str))) return str;
+    date2str_(t->mask, MASK_YEAR,  "%4d年", t->year,  str) && 
+    date2str_(t->mask, MASK_MONTH, "%2d月", t->month, str) && 
+    date2str_(t->mask, MASK_DAY,   "%2d日", t->day,   str);
     return str;
 }
 
@@ -370,8 +369,7 @@ static int
 parsemoney(char *str, int32_t *m)
 {
     int32_t ans = 0;
-    int sign = 1;
-    int p = 0;
+    int sign = 1, p = 0;
 
     if (str[p] == '-') { sign = -1; p++; }
     if (!('0' <= str[p] && str[p] <= '9')) return 0;
@@ -386,7 +384,7 @@ parsemoney(char *str, int32_t *m)
 }
 
 static int
-parsedate_(char *str, uint32_t *mask, uint32_t mask2, int upper, int lower, int *t, int offset)
+parsedate_(char *str, uint32_t *mask, uint32_t mask2, int upper, int lower, int *t)
 {
     int p = 0;
     int temp = 0;
@@ -404,50 +402,33 @@ parsedate_(char *str, uint32_t *mask, uint32_t mask2, int upper, int lower, int 
     }
     else
     {
-        *t = temp - offset;
+        *t = temp;
         *mask |= mask2;
     }
     return p;
 }
 
 static int
-parsedate(char *str, struct mytime *t, uint32_t m)
+parsedate(char *str, struct mydate *t, uint32_t m)
 {
     int ret;
     int p = 0;
     t->mask = MASK_EMPTY;
+    t->year = t->month = t->day = 0;
 
-    ret = parsedate_(str+p, &t->mask, MASK_YEAR,  1900, 2100, &(t->time.tm_year), 1900);
+    ret = parsedate_(str+p, &t->mask, MASK_YEAR,  2000, 2100, &(t->year));
     if (!ret) return 0;
     p += ret;
     if (str[p] != '/') goto LEND;
     p++;
 
-    ret = parsedate_(str+p, &t->mask, MASK_MONTH,    1,   12, &(t->time.tm_mon),  1);
+    ret = parsedate_(str+p, &t->mask, MASK_MONTH,    1,   12, &(t->month));
     if (!ret) goto LEND;
     p += ret;
     if (str[p] != '/') goto LEND;
     p++;
 
-    ret = parsedate_(str+p, &t->mask, MASK_DAY,      1,   31, &(t->time.tm_mday), 0);
-    if (!ret) goto LEND;
-    p += ret;
-    if (str[p] != ':') goto LEND;
-    p++;
-
-    ret = parsedate_(str+p, &t->mask, MASK_HOUR,     0,   23, &(t->time.tm_hour), 0);
-    if (!ret) goto LEND;
-    p += ret;
-    if (str[p] != ':') goto LEND;
-    p++;
-
-    ret = parsedate_(str+p, &t->mask, MASK_MIN,      0,   59, &(t->time.tm_min),  0);
-    if (!ret) goto LEND;
-    p += ret;
-    if (str[p] != ':') goto LEND;
-    p++;
-
-    ret = parsedate_(str+p, &t->mask, MASK_SEC,      0,   60, &(t->time.tm_sec),  0);
+    ret = parsedate_(str+p, &t->mask, MASK_DAY,      1,   31, &(t->day));
     if (!ret) goto LEND;
     p += ret;
 
@@ -460,16 +441,51 @@ LEND:
     return p;
 }
 
+static int
+date2int(struct mydate *t)
+{
+    int x = 0, i;
+    int leap = isleapyear(t->year) ? 1 : 0;
+
+    if ((t->mask & MASK_YEAR) == MASK_YEAR)
+    {
+        x = t->year * 365;
+        x += leap;
+    }
+    if ((t->mask & MASK_MONTH) == MASK_MONTH)
+    {
+        for (i = 1; i <= t->month; ++i)
+        {
+            x += MONTH[i];
+        }
+        x += leap;
+    }
+    if ((t->mask & MASK_DAY) == MASK_DAY)
+    {
+        x += t->day;
+    }
+
+    return x;
+}
+
+static int
+isleapyear(int year)
+{
+    return (year % 4) == 0 && ((year % 100) != 0 || (year % 400) == 0);
+}
+
 static void
-getnowdate(struct mytime *t)
+getnowdate(struct mydate *t)
 {
     time_t now;
     struct tm *ts;
 
     now = time(NULL);
     ts = localtime(&now);
-    t->time = *ts;
-    t->mask = MASK_ALL;
+    t->year  = ts->tm_year + 1900;
+    t->month = ts->tm_mon + 1;
+    t->day   = ts->tm_mday;
+    t->mask  = MASK_ALL;
 }
 
 static void
@@ -526,7 +542,7 @@ modeadd(int argc_org, char *argv_org[])
 {
     int argc = argc_org;
     char **argv = argv_org;
-    struct mytime time;
+    struct mydate time;
     int silent;
     char *note, *cat, *loc;
     int cat_len;
@@ -543,7 +559,7 @@ modeadd(int argc_org, char *argv_org[])
     }
     else
     {
-        parsedate(*argv, &time, MASK_YMD);
+        parsedate(*argv, &time, MASK_ALL);
         argv++;
     }
 
@@ -574,15 +590,13 @@ modeadd(int argc_org, char *argv_org[])
         int i, len, sum = 0;
         struct record *recs = load(&time, &len);
 
-        printf("日付: %s\n品名: %s\n",
-                datetime2str_w(&time, MASK_ALL), cat);
+        printf("日付: %s\n品名: %s\n", date2str_w(&time, MASK_ALL), cat);
         if (loc != NULL) printf("場所: %s\n", loc);
         printf("金額: %'d\n", money);
         if (note != NULL) printf("備考: %s\n", note);
 
         for (i = 0; i < len; ++i) sum += (recs+i)->money;
-        printf("%d年%d月の合計使用金額: %'d円\n",
-                time.time.tm_year+1900, time.time.tm_mon+1, sum);
+        printf("%d年%d月の合計使用金額: %'d\n", time.year, time.month, sum);
         free_records(recs, len);
     }
 
@@ -597,40 +611,115 @@ modestat(int argc, char *argv[])
 }
 
 static void
+setterm(struct mydate *t1, struct mydate *t2)
+{
+    t2->mask = t1->mask;
+    if ((t1->mask & MASK_DAY) == MASK_DAY)
+    {
+        t2->year  = t1->year;
+        t2->month = t1->month;
+        t2->day   = t1->day+1;
+    }
+    else if ((t1->mask & MASK_MONTH) == MASK_MONTH)
+    {
+        t2->year  = t1->year;
+        t2->month = t1->month+1;
+        if (t2->month > 12) t2->month = 1;
+        t2->day   = t1->day = 0;
+    }
+    else if ((t1->mask & MASK_YEAR) == MASK_YEAR)
+    {
+        t2->year  = t1->year+1;
+        t2->month = t1->month = 0;
+        t2->day   = t1->day   = 0;
+    }
+}
+
+static void
+initterm(struct mydate *t1, struct mydate *t2)
+{
+    t2->mask  = t1->mask;
+    t2->year  = t1->year;
+    t2->month = t1->month;
+    t2->day   = 0;
+}
+
+static void
+nextterm(struct mydate *t)
+{
+    t->month++;
+    if (t->month > 12)
+    {
+        t->month = 1;
+        t->year++;
+    }
+}
+
+static void
 modeshow(int argc, char *argv[])
 {
     struct record *recs;
     struct record *rec_p;
     int recs_num;
-    struct mytime stime;
-    struct mytime etime;
+    struct mydate stime;
+    struct mydate mtime;
+    struct mydate etime;
     int i;
+    int si, mi, ei;
 
     if (strcmp(CMD_SHOW, argv[1])) uses(argv);
 
     if (argc == 2)
     {
         getnowdate(&stime);
+        stime.mask = MASK_YEAR | MASK_MONTH;
+        setterm(&stime, &etime);
     }
     else
     {
         parsedate(argv[2], &stime, MASK_YEAR);
-        if (argc >= 4)
-            parsedate(argv[3], &etime, MASK_YEAR);
-    }
-
-    recs = load(&stime, &recs_num);
-    for (i = 0; i < recs_num; ++i)
-    {
-        rec_p = recs+i;
-        printf("%s 品名:%s 場所:%s 金額:%'d\n",
-                datetime2str_w(&(rec_p->time), MASK_YMD), rec_p->cat, rec_p->loc, rec_p->money);
-        if (strlen(rec_p->note) > 0)
+        if (argc == 3)
         {
-            printf("備考:%s\n", rec_p->note);
+            setterm(&stime, &etime);
+        }
+        else
+        {
+            parsedate(argv[3], &etime, MASK_ALL);
+            if (date2int(&stime) < date2int(&etime))
+            {
+                fprintf(stderr, "Error: 日付の範囲指定が間違っています\n");
+                exit(EXIT_FAILURE);
+            }
+            if (stime.mask != MASK_ALL || etime.mask != MASK_ALL)
+            {
+                fprintf(stderr, "Error: 日付範囲の初めと終わりを指定する場合，日にちまで指定する必要があります\n");
+                exit(EXIT_FAILURE);
+            }
         }
     }
-    free_records(recs, recs_num);
+
+    si = date2int(&stime);
+    ei = date2int(&etime);
+    for (initterm(&stime, &mtime); date2int(&mtime) < ei; nextterm(&mtime))
+    {
+        recs = load(&mtime, &recs_num);
+        printf("==== %sの家計簿 ====\n", date2str_w(&mtime, MASK_YEAR | MASK_MONTH));
+        for (i = 0; i < recs_num; ++i)
+        {
+            rec_p = recs+i;
+            mi = date2int(&(rec_p->date));
+            if (si < mi && mi <= ei)
+            {
+                printf("%s 品名: %s 場所: %s 金額: %'d 備考: %s\n",
+                        date2str_w(&(rec_p->date), MASK_ALL),
+                        rec_p->cat,
+                        rec_p->loc,
+                        rec_p->money,
+                        rec_p->note);
+            }
+        }
+        free_records(recs, recs_num);
+    }
 }
 
 int
