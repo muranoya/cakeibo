@@ -64,7 +64,7 @@ static int  parsedate_(char *str, uint32_t *mask, uint32_t mask2, int upper, int
 static int  parsedate(char *str, struct mydate *t, uint32_t m);
 static int  date2int(struct mydate *t);
 static int  isleapyear(int year);
-static int daysinmonth(int y, int m);
+static int  daysinmonth(int y, int m);
 static void getnowdate(struct mydate *t);
 static void modeadd_opt(int *argc, char **argv[], char **loc, char **note, int *silent);
 static void modeadd(int argc, char *argv[]);
@@ -194,6 +194,9 @@ load(struct mydate *t, int *len, int ignore_open_error)
         }
 
         rec_p = recs+line;
+        rec_p->cat = NULL;
+        rec_p->loc = NULL;
+        rec_p->note = NULL;
 
         // 日付
         p = parsedate(buf, &(rec_p->date), MASK_YMD);
@@ -247,7 +250,8 @@ load(struct mydate *t, int *len, int ignore_open_error)
         // 備考
         for (i = 0; ; i++, p++)
         {
-            if (*(buf+p) == '\n') break;
+            //if (*(buf+p) == '\n') break;
+            if (strncmp(DELIMITER, buf+p, delimiter_len) == 0) break;
             if (i > MAX_NOTE_LEN)
             {
                 errstr = "ログファイルの備考が長過ぎます";
@@ -281,12 +285,12 @@ append(struct mydate *t, char *cat, char *loc, int32_t money, char *note)
             "%s%s"
             "%s%s"
             "%d%s"
-            "%s\n",
+            "%s%s\n",
             date2str(t), DELIMITER,
             cat, DELIMITER,
             loc == NULL ? "" : loc, DELIMITER,
             money, DELIMITER,
-            note == NULL ? "" : note);
+            note == NULL ? "" : note, DELIMITER);
 
     fclose(fp);
 }
