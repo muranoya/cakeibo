@@ -625,23 +625,23 @@ setterm(struct mydate *t1, struct mydate *t2)
         t2->year  = t1->year;
         t2->month = t1->month+1;
         if (t2->month > 12) t2->month = 1;
-        t2->day   = t1->day = 0;
+        t2->day   = t1->day = 1;
     }
     else if ((t1->mask & MASK_YEAR) == MASK_YEAR)
     {
         t2->year  = t1->year+1;
-        t2->month = t1->month = 0;
-        t2->day   = t1->day   = 0;
+        t2->month = t1->month = 1;
+        t2->day   = t1->day   = 1;
     }
 }
 
 static void
 initterm(struct mydate *t1, struct mydate *t2)
 {
-    t2->mask  = t1->mask;
+    t2->mask  = MASK_YEAR | MASK_MONTH;
     t2->year  = t1->year;
     t2->month = t1->month;
-    t2->day   = 0;
+    t2->day   = 1;
 }
 
 static void
@@ -685,7 +685,7 @@ modeshow(int argc, char *argv[])
         else
         {
             parsedate(argv[3], &etime, MASK_ALL);
-            if (date2int(&stime) < date2int(&etime))
+            if (date2int(&stime) > date2int(&etime))
             {
                 fprintf(stderr, "Error: 日付の範囲指定が間違っています\n");
                 exit(EXIT_FAILURE);
@@ -708,7 +708,7 @@ modeshow(int argc, char *argv[])
         {
             rec_p = recs+i;
             mi = date2int(&(rec_p->date));
-            if (si < mi && mi <= ei)
+            if (si < mi && mi < ei)
             {
                 printf("%s 品名: %s 場所: %s 金額: %'d 備考: %s\n",
                         date2str_w(&(rec_p->date), MASK_ALL),
