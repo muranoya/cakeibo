@@ -704,8 +704,10 @@ modeshow(int argc, char *argv[])
                         rec_p->note);
             }
         }
-        printf("合計使用金額: %'d\n1日の平均使用金額: %'d\n\n",
-                sum, sum / daysinmonth(mtime.year, mtime.month));
+        printf("合計使用金額: %'d\n1日の平均使用金額: %'d\n1回の平均使用金額: %'d\n\n",
+                sum,
+                sum / daysinmonth(mtime.year, mtime.month),
+                sum / recs_num);
         free_records(recs, recs_num);
     }
 }
