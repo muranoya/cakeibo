@@ -7,10 +7,13 @@
 #include <sys/stat.h>
 #include <locale.h>
 
+#include "hashmap.h"
+#include "string.h"
+#include "util.h"
+
 #define DATA_DIR (".cakeibo")
 
 #define CMD_ADD  ("add")
-#define CMD_STAT ("stat")
 #define CMD_SHOW ("show")
 #define CMD_HELP ("help")
 
@@ -47,8 +50,6 @@ struct record
     char *note;
 };
 
-static void *try_realloc(void *pointer, size_t size);
-static void *try_malloc(size_t size);
 static void free_records(struct record *r, int len);
 static void uses(char *argv[]);
 static FILE *open(struct mydate *t, const char *mode);
@@ -66,7 +67,6 @@ static int isleapyear(int year);
 static void getnowdate(struct mydate *t);
 static void modeadd_opt(int *argc, char **argv[], char **loc, char **note, int *silent);
 static void modeadd(int argc, char *argv[]);
-static void modestat(int argc, char *argv[]);
 static void setterm(struct mydate *t1, struct mydate *t2);
 static void initterm(struct mydate *t1, struct mydate *t2);
 static void nextterm(struct mydate *t);
@@ -78,29 +78,6 @@ static int MONTH[] = {
     31, 30, 31, 31,
     30, 31, 30, 31};
 
-static void *
-try_realloc(void *pointer, size_t size)
-{
-    void *p = realloc(pointer, size);
-    if (p == NULL)
-    {
-        perror("");
-        exit(EXIT_FAILURE);
-    }
-    return p;
-}
-
-static void *
-try_malloc(size_t size)
-{
-    void *p = malloc(size);
-    if (p == NULL)
-    {
-        perror("");
-        exit(EXIT_FAILURE);
-    }
-    return p;
-}
 
 static void
 free_records(struct record *r, int len)
@@ -127,10 +104,6 @@ uses(char *argv[])
             "\t\t指定する場合，日にちまでは指定する必要がある\n"
             "\t[-s]: 結果を表示しない\n\n"
 
-            "%s %s [日付]\n"
-            "\t家計簿の統計情報を表示する\n"
-            "\t[日付]: 省略可(省略した場合，今月のデータが表示される)\n\n"
-            
             "%s %s [範囲初めの日付] [範囲終わりの日付]\n"
             "\t家計簿のデータを表示する\n"
             "\t[範囲初めの日付]: 省略可\n"
@@ -146,7 +119,6 @@ uses(char *argv[])
             "\t\t右から順に省略してよい\n"
             "\t[金額]: \",\"を含む記述が可能\n",
             argv[0], CMD_ADD,
-            argv[0], CMD_STAT,
             argv[0], CMD_SHOW,
             argv[0], CMD_HELP);
 
@@ -606,11 +578,6 @@ modeadd(int argc_org, char *argv_org[])
 }
 
 static void
-modestat(int argc, char *argv[])
-{
-}
-
-static void
 setterm(struct mydate *t1, struct mydate *t2)
 {
     t2->mask = t1->mask;
@@ -728,7 +695,6 @@ main(int argc, char *argv[])
     setlocale(LC_NUMERIC, getenv("LANG"));
     if (argc <= 1)                           uses(argv);
     if      (strcmp(CMD_ADD,  argv[1]) == 0) modeadd(argc, argv);
-    else if (strcmp(CMD_STAT, argv[1]) == 0) modestat(argc, argv);
     else if (strcmp(CMD_SHOW, argv[1]) == 0) modeshow(argc, argv);
     else if (strcmp(CMD_HELP, argv[1]) == 0) uses(argv);
     else                                     uses(argv);
