@@ -47,9 +47,6 @@ parsedate_(const char *str, uint32_t *mask, uint32_t mask2, int upper, int lower
     return p;
 }
 
-
-
-
 int
 isleapyear(int year)
 {
@@ -176,15 +173,15 @@ parsedate(const char *str, struct mydate *t, uint32_t m)
     t->year = 0;
     t->month = t->day = 1;
 
-    ret = parsedate_(str+p, &t->mask, MASK_YEAR,  2000, 2100, &(t->year));
+    ret = parsedate_(str+p, &(t->mask), MASK_YEAR,  2000, 2100, &(t->year));
     if (!ret) return 0; else p += ret;
     if (str[p] != '/') goto LEND; else p++;
 
-    ret = parsedate_(str+p, &t->mask, MASK_MONTH,    1,   12, &(t->month));
+    ret = parsedate_(str+p, &(t->mask), MASK_MONTH,    1,   12, &(t->month));
     if (!ret) goto LEND; else p += ret;
     if (str[p] != '/') goto LEND; else p++;
 
-    ret = parsedate_(str+p, &t->mask, MASK_DAY,      1,   31, &(t->day));
+    ret = parsedate_(str+p, &(t->mask), MASK_DAY,      1,   31, &(t->day));
     if (!ret) goto LEND; else p += ret;
 
 LEND:

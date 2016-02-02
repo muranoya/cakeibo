@@ -6,6 +6,7 @@
 #define MASK_DAY   (0x08U)
 #define MASK_EMPTY (0x00U)
 #define MASK_YMD (MASK_YEAR | MASK_MONTH | MASK_DAY)
+#define MASK_YM  (MASK_YEAR | MASK_MONTH)
 
 struct mydate
 {
