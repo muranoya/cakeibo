@@ -1,7 +1,7 @@
 CC=cc
 CFLAGS=-O2 -Wall
 PROGRAM=cakeibo
-OBJS=cakeibo.o hashmap.o string.o util.o date.o file.o
+OBJS=cakeibo.o util.o date.o file.o
 
 .PHONY: clean all
 .SUFFIXES: .c .o

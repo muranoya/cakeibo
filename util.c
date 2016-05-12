@@ -1,5 +1,5 @@
+#include "util.h"
 #include <stdio.h>
-#include <stdlib.h>
     
 void *
 try_realloc(void *pointer, size_t size)

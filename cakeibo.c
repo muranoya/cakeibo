@@ -5,8 +5,6 @@
 #include <stdint.h>
 #include <locale.h>
 
-//#include "hashmap.h"
-//#include "string.h"
 #include "util.h"
 #include "date.h"
 #include "file.h"
@@ -40,7 +38,8 @@ static void free_records(struct record *r, int len);
 static int  parsemoney(char *str, int32_t *m);
 static int  recordcmp(const void *a, const void *b);
 static void recordsort(struct record *rec, int num);
-static void modeadd_opt(int *argc, char **argv[], char **loc, char **note, int *silent, int *force);
+static void modeadd_opt(int *argc, char **argv[],
+        char **loc, char **note, int *silent, int *force);
 static void modeadd(int argc, char *argv[]);
 static void modeshow_opt(int *argc, char **argv[], int *sort);
 static void modeshow(int argc, char *argv[]);
@@ -245,7 +244,8 @@ recordsort(struct record *rec, int num)
 }
 
 static void
-modeadd_opt(int *argc, char **argv[], char **loc, char **note, int *silent, int *force)
+modeadd_opt(int *argc, char **argv[],
+        char **loc, char **note, int *silent, int *force)
 {
     int result;
     int note_len;
